@@ -24,11 +24,11 @@ def get_parser():
     parser.add_argument(
         '--num-classes', type=int, default=60, help='number of classes in dataset')
     parser.add_argument(
-        '--batch-size', type=int, default=256, help='training batch size')
+        '--batch-size', type=int, default=64, help='training batch size')
     parser.add_argument(
         '--num-epochs', type=int, default=80, help='total epochs to train')
     parser.add_argument(
-        '--save-freq', type=int, default=25, help='periodicity of saving model weights')
+        '--save-freq', type=int, default=20, help='periodicity of saving model weights')
     parser.add_argument(
         '--checkpoint-path',
         default="checkpoints/DGNN",
@@ -45,11 +45,6 @@ def get_parser():
         '--test-data-path',
         default="data/ntu/xview/val_data",
         help='path to folder with testing dataset tfrecord files')
-    parser.add_argument(
-        '--freeze-graph-until',
-        type=int,
-        default=10,
-        help='number of epochs before making graphs learnable')
     parser.add_argument(
         '--steps',
         type=int,
@@ -81,7 +76,8 @@ Args:
 Returns:
   The Dataset with features and one hot encoded label data
 '''
-def get_dataset(directory, num_classes=60, batch_size=32, drop_remainder=False, shuffle=False, shuffle_size=1000):
+def get_dataset(directory, num_classes=60, batch_size=32, drop_remainder=False,
+                shuffle=False, shuffle_size=1000):
     # dictionary describing the features.
     feature_description = {
         'features': tf.io.FixedLenFeature([], tf.string),
@@ -91,8 +87,10 @@ def get_dataset(directory, num_classes=60, batch_size=32, drop_remainder=False, 
     # parse each proto and, the features within
     def _parse_feature_function(example_proto):
         features = tf.io.parse_single_example(example_proto, feature_description)
-        return tf.io.parse_tensor(features['features'], tf.float32), \
-               tf.one_hot(features['label'], num_classes)
+        data =  tf.io.parse_tensor(features['features'], tf.float32)
+        label = tf.one_hot(features['label'], num_classes)
+        data = tf.reshape(data, (3, 300, 25, 2))
+        return data, label
 
     records = [os.path.join(directory, file) for file in os.listdir(directory) if file.endswith("tfrecord")]
     dataset = tf.data.TFRecordDataset(records, num_parallel_reads=len(records))
@@ -102,24 +100,6 @@ def get_dataset(directory, num_classes=60, batch_size=32, drop_remainder=False, 
     if shuffle:
         dataset = dataset.shuffle(shuffle_size)
     return dataset
-
-
-'''
-get_cross_entropy_loss: Computes softmax cross entropy between logits and labels.
-Args:
-  labels: Each vector along the class dimension should hold a valid probability
-          distribution e.g. for the case in which labels are of shape
-          [batch_size, num_classes], each row of labels[i]
-          must be a valid probability distribution.
-  logits: logits: Per-label activations, typically a linear output.
-          These activation energies are interpreted as unnormalized
-          log probabilities.
-Returns:
-  cross_entropy_loss
-'''
-def get_cross_entropy_loss(labels, logits):
-    loss = tf.nn.softmax_cross_entropy_with_logits(labels=labels, logits=logits)
-    return tf.reduce_mean(loss)
 
 
 '''
@@ -136,18 +116,30 @@ def test_step(features):
 '''
 train_step: trains model with cross entropy loss
 Args:
-  features  : tensor with features
-  labels    : one hot encoded labels
+  dist_inputs : tuple with features and logits
+  features    : tensor with features
+  labels      : one hot encoded labels
   train_incidence: When true incidence matrices will be trained
 '''
 @tf.function
 def train_step(features, labels):
+  def step_fn(features, labels):
     with tf.GradientTape() as tape:
-        logits = model(features, training=True)
-        loss   = get_cross_entropy_loss(labels=labels, logits=logits)
-    gradients  = tape.gradient(loss, model.trainable_variables)
-    optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-    return loss, tf.nn.softmax(logits)
+      logits = model(features, training=True)
+      cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=logits,
+                                                              labels=labels)
+      loss = tf.reduce_sum(cross_entropy) * (1.0 / global_batch_size)
+
+    grads = tape.gradient(loss, model.trainable_variables)
+    optimizer.apply_gradients(list(zip(grads, model.trainable_variables)))
+    return cross_entropy, tf.nn.softmax(logits)
+
+  per_example_losses, per_example_logits = mirrored_strategy.experimental_run_v2(step_fn,
+                                                                                 args=(features, labels,))
+  mean_loss = mirrored_strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                       per_example_losses,
+                                       axis=0)
+  return mean_loss, per_example_logits
 
 
 if __name__ == "__main__":
@@ -160,7 +152,6 @@ if __name__ == "__main__":
 
     base_lr         = arg.base_lr
     num_classes     = arg.num_classes
-    batch_size      = arg.batch_size
     epochs          = arg.num_epochs
     checkpoint_path = arg.checkpoint_path
     log_dir         = arg.log_dir
@@ -168,6 +159,10 @@ if __name__ == "__main__":
     test_data_path  = arg.test_data_path
     save_freq       = arg.save_freq
     steps           = arg.steps
+    batch_size      = arg.batch_size
+
+    mirrored_strategy = tf.distribute.MirroredStrategy()
+    global_batch_size = arg.batch_size*mirrored_strategy.num_replicas_in_sync
 
     '''
     Get tf.dataset objects for training and testing data
@@ -176,9 +171,10 @@ if __name__ == "__main__":
     '''
     train_data = get_dataset(train_data_path,
                              num_classes=num_classes,
-                             batch_size=batch_size,
+                             batch_size=global_batch_size,
                              drop_remainder=True,
                              shuffle=True)
+    #train_data = mirrored_strategy.experimental_distribute_dataset(train_data)
 
     test_data = get_dataset(test_data_path,
                             num_classes=num_classes,
@@ -192,9 +188,11 @@ if __name__ == "__main__":
         values[i] *= 0.1**i
     learning_rate  = tf.keras.optimizers.schedules.PiecewiseConstantDecay(boundaries, values)
 
-    model          = AGCN(num_classes=num_classes)
-    optimizer      = tf.keras.optimizers.SGD(learning_rate=learning_rate,
-                                             momentum=0.9)
+    with mirrored_strategy.scope():
+        model          = AGCN(num_classes=num_classes)
+        optimizer      = tf.keras.optimizers.SGD(learning_rate=learning_rate,
+                                                 momentum=0.9)
+
     summary_writer = tf.summary.create_file_writer(log_dir)
     ckpt           = tf.train.Checkpoint(model=model, optimizer=optimizer)
     ckpt_manager   = tf.train.CheckpointManager(ckpt, checkpoint_path, max_to_keep=5)
@@ -247,19 +245,20 @@ if __name__ == "__main__":
                                  step=epoch)
 
         print("Training: ")
-        for features, labels in tqdm(train_data):
-            loss, y_pred = train_step(features, labels)
-            train_acc(labels, y_pred)
-            train_acc_top_5(labels, y_pred)
-            cross_entropy_loss(loss)
-            with summary_writer.as_default():
-                tf.summary.scalar("cross_entropy_loss", cross_entropy_loss.result(), step=train_iter)
-                tf.summary.scalar("train_acc", train_acc.result(), step=train_iter)
-                tf.summary.scalar("train_acc_top_5", train_acc_top_5.result(), step=train_iter)
-            cross_entropy_loss.reset_states()
-            train_acc.reset_states()
-            train_acc_top_5.reset_states()
-            train_iter += 1
+        with mirrored_strategy.scope():
+            for features, labels in tqdm(train_data):
+                loss, y_pred = train_step(features, labels)
+                train_acc(labels, y_pred)
+                train_acc_top_5(labels, y_pred)
+                cross_entropy_loss(loss)
+                with summary_writer.as_default():
+                    tf.summary.scalar("cross_entropy_loss", cross_entropy_loss.result(), step=train_iter)
+                    tf.summary.scalar("train_acc", train_acc.result(), step=train_iter)
+                    tf.summary.scalar("train_acc_top_5", train_acc_top_5.result(), step=train_iter)
+                cross_entropy_loss.reset_states()
+                train_acc.reset_states()
+                train_acc_top_5.reset_states()
+                train_iter += 1
 
         print("Testing: ")
         for features, labels in tqdm(test_data):
