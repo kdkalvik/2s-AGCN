@@ -1,3 +1,5 @@
+data/ntu/
+
 # Created by .ignore support plugin (hsz.mobi)
 
 .idea/
@@ -107,4 +109,3 @@ venv.bak/
 
 # mypy
 .mypy_cache/
-
