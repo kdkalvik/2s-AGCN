@@ -24,7 +24,7 @@ def get_parser():
     parser.add_argument(
         '--num-classes', type=int, default=60, help='number of classes in dataset')
     parser.add_argument(
-        '--batch-size', type=int, default=64, help='training batch size')
+        '--batch-size', type=int, default=4, help='training batch size')
     parser.add_argument(
         '--num-epochs', type=int, default=80, help='total epochs to train')
     parser.add_argument(
@@ -89,7 +89,7 @@ def get_dataset(directory, num_classes=60, batch_size=32, drop_remainder=False,
         features = tf.io.parse_single_example(example_proto, feature_description)
         data =  tf.io.parse_tensor(features['features'], tf.float32)
         label = tf.one_hot(features['label'], num_classes)
-        data = tf.reshape(data, (3, 300, 25, 2))
+        data = tf.reshape(data, (3, 2, 25, 300))
         return data, label
 
     records = [os.path.join(directory, file) for file in os.listdir(directory) if file.endswith("tfrecord")]
@@ -116,10 +116,8 @@ def test_step(features):
 '''
 train_step: trains model with cross entropy loss
 Args:
-  dist_inputs : tuple with features and logits
   features    : tensor with features
   labels      : one hot encoded labels
-  train_incidence: When true incidence matrices will be trained
 '''
 @tf.function
 def train_step(features, labels):
@@ -129,17 +127,13 @@ def train_step(features, labels):
       cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=logits,
                                                               labels=labels)
       loss = tf.reduce_sum(cross_entropy) * (1.0 / global_batch_size)
-
     grads = tape.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(list(zip(grads, model.trainable_variables)))
-    return cross_entropy, tf.nn.softmax(logits)
+    train_acc(labels, logits)
+    train_acc_top_5(labels, logits)
+    cross_entropy_loss(loss)
 
-  per_example_losses, per_example_logits = mirrored_strategy.experimental_run_v2(step_fn,
-                                                                                 args=(features, labels,))
-  mean_loss = mirrored_strategy.reduce(tf.distribute.ReduceOp.MEAN,
-                                       per_example_losses,
-                                       axis=0)
-  return mean_loss, per_example_logits
+  strategy.experimental_run_v2(step_fn, args=(features, labels,))
 
 
 if __name__ == "__main__":
@@ -160,9 +154,8 @@ if __name__ == "__main__":
     save_freq       = arg.save_freq
     steps           = arg.steps
     batch_size      = arg.batch_size
-
-    mirrored_strategy = tf.distribute.MirroredStrategy()
-    global_batch_size = arg.batch_size*mirrored_strategy.num_replicas_in_sync
+    strategy        = tf.distribute.MirroredStrategy()
+    global_batch_size = arg.batch_size*strategy.num_replicas_in_sync
 
     '''
     Get tf.dataset objects for training and testing data
@@ -174,7 +167,7 @@ if __name__ == "__main__":
                              batch_size=global_batch_size,
                              drop_remainder=True,
                              shuffle=True)
-    #train_data = mirrored_strategy.experimental_distribute_dataset(train_data)
+    train_data = strategy.experimental_distribute_dataset(train_data)
 
     test_data = get_dataset(test_data_path,
                             num_classes=num_classes,
@@ -188,26 +181,26 @@ if __name__ == "__main__":
         values[i] *= 0.1**i
     learning_rate  = tf.keras.optimizers.schedules.PiecewiseConstantDecay(boundaries, values)
 
-    with mirrored_strategy.scope():
-        model          = AGCN(num_classes=num_classes)
-        optimizer      = tf.keras.optimizers.SGD(learning_rate=learning_rate,
-                                                 momentum=0.9)
+    with strategy.scope():
+        model        = AGCN(num_classes=num_classes)
+        optimizer    = tf.keras.optimizers.SGD(learning_rate=learning_rate,
+                                               momentum=0.9)
+        ckpt         = tf.train.Checkpoint(model=model, optimizer=optimizer)
+        ckpt_manager = tf.train.CheckpointManager(ckpt, checkpoint_path, max_to_keep=5)
 
-    summary_writer = tf.summary.create_file_writer(log_dir)
-    ckpt           = tf.train.Checkpoint(model=model, optimizer=optimizer)
-    ckpt_manager   = tf.train.CheckpointManager(ckpt, checkpoint_path, max_to_keep=5)
+        # keras metrics to hold accuracies and loss
+        cross_entropy_loss   = tf.keras.metrics.Mean(name='cross_entropy_loss')
+        train_acc            = tf.keras.metrics.CategoricalAccuracy(name='train_acc')
+        train_acc_top_5      = tf.keras.metrics.TopKCategoricalAccuracy(name='train_acc_top_5')
 
-    # keras metrics to hold accuracies and loss
-    cross_entropy_loss   = tf.keras.metrics.Mean(name='cross_entropy_loss')
-    train_acc            = tf.keras.metrics.CategoricalAccuracy(name='train_acc')
-    test_acc             = tf.keras.metrics.CategoricalAccuracy(name='test_acc')
     epoch_test_acc       = tf.keras.metrics.CategoricalAccuracy(name='epoch_test_acc')
-    train_acc_top_5      = tf.keras.metrics.TopKCategoricalAccuracy(name='train_acc_top_5')
-    test_acc_top_5       = tf.keras.metrics.TopKCategoricalAccuracy(name='test_acc_top_5')
     epoch_test_acc_top_5 = tf.keras.metrics.TopKCategoricalAccuracy(name='epoch_test_acc_top_5')
+    test_acc_top_5       = tf.keras.metrics.TopKCategoricalAccuracy(name='test_acc_top_5')
+    test_acc             = tf.keras.metrics.CategoricalAccuracy(name='test_acc')
+    summary_writer       = tf.summary.create_file_writer(log_dir)
 
     # Get 1 batch from train dataset to get graph trace of train and test functions
-    for data in train_data:
+    for data in test_data:
         features, labels = data
         break
 
@@ -245,12 +238,9 @@ if __name__ == "__main__":
                                  step=epoch)
 
         print("Training: ")
-        with mirrored_strategy.scope():
+        with strategy.scope():
             for features, labels in tqdm(train_data):
-                loss, y_pred = train_step(features, labels)
-                train_acc(labels, y_pred)
-                train_acc_top_5(labels, y_pred)
-                cross_entropy_loss(loss)
+                train_step(features, labels)
                 with summary_writer.as_default():
                     tf.summary.scalar("cross_entropy_loss", cross_entropy_loss.result(), step=train_iter)
                     tf.summary.scalar("train_acc", train_acc.result(), step=train_iter)
@@ -285,3 +275,4 @@ if __name__ == "__main__":
 
     ckpt_save_path = ckpt_manager.save()
     print('Saving final checkpoint for epoch {} at {}'.format(epochs, ckpt_save_path))
+
