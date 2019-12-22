@@ -24,11 +24,11 @@ def get_parser():
     parser.add_argument(
         '--num-classes', type=int, default=60, help='number of classes in dataset')
     parser.add_argument(
-        '--batch-size', type=int, default=4, help='training batch size')
+        '--batch-size', type=int, default=64, help='training batch size')
     parser.add_argument(
-        '--num-epochs', type=int, default=80, help='total epochs to train')
+        '--num-epochs', type=int, default=50, help='total epochs to train')
     parser.add_argument(
-        '--save-freq', type=int, default=20, help='periodicity of saving model weights')
+        '--save-freq', type=int, default=10, help='periodicity of saving model weights')
     parser.add_argument(
         '--checkpoint-path',
         default="checkpoints/DGNN",
@@ -48,9 +48,14 @@ def get_parser():
     parser.add_argument(
         '--steps',
         type=int,
-        default=[20, 40, 60],
+        default=[30, 40],
         nargs='+',
         help='the epoch where optimizer reduce the learning rate')
+    parser.add_argument(
+        '--gpus',
+        default=None,
+        nargs='+',
+        help='list of gpus to use for training, eg: "/gpu:0" "/gpu:1"')
 
     return parser
 
@@ -157,7 +162,8 @@ if __name__ == "__main__":
     save_freq       = arg.save_freq
     steps           = arg.steps
     batch_size      = arg.batch_size
-    strategy        = tf.distribute.MirroredStrategy()
+    gpus            = arg.gpus
+    strategy        = tf.distribute.MirroredStrategy(arg.gpus)
     global_batch_size = arg.batch_size*strategy.num_replicas_in_sync
 
     '''
