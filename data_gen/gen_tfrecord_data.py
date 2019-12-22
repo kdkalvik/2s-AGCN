@@ -23,7 +23,7 @@ def serialize_example(features, label):
     }
     return tf.train.Example(features=tf.train.Features(feature=feature)).SerializeToString()
 
-def gen_tfrecord_data(num_shards, label_path, data_path, dest_folder):
+def gen_tfrecord_data(num_shards, label_path, data_path, dest_folder, shuffle):
     label_path = Path(label_path)
     if not (label_path.exists()):
         print('Label file does not exist')
@@ -43,7 +43,19 @@ def gen_tfrecord_data(num_shards, label_path, data_path, dest_folder):
             _, labels = pickle.load(f, encoding='latin1')
 
     # Datashape: Total_samples, 3, 300, 25, 2
-    data  = np.load(data_path, mmap_mode='r')
+    data   = np.load(data_path, mmap_mode='r')
+    labels = np.array(labels)
+
+    if len(labels) != len(data):
+        print("Data and label lengths didn't match!")
+        print("Data size: {} | Label Size: {}".format(data.shape, labels.shape))
+        return -1
+
+    print("Data shape:", data.shape)
+    if shuffle:
+        p = np.random.permutation(len(labels))
+        labels = labels[p]
+        data = data[p]
 
     dest_folder = Path(dest_folder)
     if not (dest_folder.exists()):
@@ -57,7 +69,7 @@ def gen_tfrecord_data(num_shards, label_path, data_path, dest_folder):
                 writer.write(serialize_example(data[i], labels[i]))
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='NTU-RGB-D Data TFRecord Converter.')
+    parser = argparse.ArgumentParser(description='NTU-RGB-D Data TFRecord Converter')
     parser.add_argument('--num-shards',
                         type=int,
                         default=40,
@@ -65,6 +77,9 @@ if __name__ == '__main__':
     parser.add_argument('--label-path',
                         required=True,
                         help='path to pkl file with labels')
+    parser.add_argument('--shuffle',
+                        required=True,
+                        help='setting it to True will shuffle the labels and data together')
     parser.add_argument('--data-path',
                         required=True,
                         help='path to npy file with data')
@@ -76,4 +91,5 @@ if __name__ == '__main__':
     gen_tfrecord_data(arg.num_shards,
                       arg.label_path,
                       arg.data_path,
-                      arg.dest_folder)
+                      arg.dest_folder,
+                      arg.shuffle)
