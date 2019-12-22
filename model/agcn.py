@@ -30,7 +30,8 @@ class TCN(tf.keras.Model):
 
 
 class GCN(tf.keras.Model):
-    def __init__(self, filters, adjacency_matrix, coff_embedding=4, num_subset=3, down=False):
+    def __init__(self, filters, adjacency_matrix, coff_embedding=4, num_subset=3,
+                 down=False):
         super().__init__()
         self.num_subset = num_subset
         self.down = down
@@ -82,14 +83,22 @@ class GCN(tf.keras.Model):
 
         x_agg = []
         for i in range(self.num_subset):
-            C1 = tf.reshape(tf.transpose(self.conv_a[i](x), perm=(0, 3, 1, 2)), (N, V, -1))
-            C2 = tf.reshape(self.conv_b[i](x), (N, -1, V))
-            C_comb = tf.nn.softmax(tf.matmul(C1, C2), axis=-2)
+            C1 = self.conv_a[i](x)
+            C1 = tf.transpose(C1, perm=(0, 3, 1, 2))
+            C1 = tf.reshape(C1, (N, V, -1))
 
-            x_k = tf.matmul(tf.reshape(x, (N, -1, V)), self.A[i] + self.B[i] + C_comb)
+            C2 = self.conv_b[i](x)
+            C2 = tf.reshape(C2, (N, -1, V))
+
+            C_comb = tf.matmul(C1, C2) / tf.cast(tf.shape(C1)[-1], dtype=tf.float32)
+            C_comb = tf.nn.softmax(C_comb, axis=-2) # N V V
+
+            x_k = tf.reshape(x, (N, -1, V))
+            x_k = tf.matmul(x_k, self.A[i] + self.B[i] + C_comb)
             x_k = tf.reshape(x_k, (N, C, T, V))
             x_k = self.conv_d[i](x_k)
             x_agg.append(x_k)
+
         x_agg = tf.reduce_sum(x_agg, axis=0)
         x_agg = self.bn(x_agg, training=training)
         if self.down:
