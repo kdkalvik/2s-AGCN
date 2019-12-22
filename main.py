@@ -65,13 +65,17 @@ def save_arg(arg):
 
 
 '''
-get_dataset: Returns a tensorflow dataset object with features and one hot encoded label data
+get_dataset: Returns a tensorflow dataset object with features and one hot
+encoded label data
 Args:
   directory       : Path to folder with TFRecord files for dataset
   num_classes     : Number of classes in dataset for one hot encoding
-  batch_size      : Represents the number of consecutive elements of this dataset to combine in a single batch.
-  drop_remainder  : If True, the last batch will be dropped in the case it has fewer than batch_size elements. Defaults to False
-  shuffle         : If True, the data samples will be shuffled randomly. Defaults to False
+  batch_size      : Represents the number of consecutive elements of this
+                    dataset to combine in a single batch.
+  drop_remainder  : If True, the last batch will be dropped in the case it has
+                    fewer than batch_size elements. Defaults to False
+  shuffle         : If True, the data samples will be shuffled randomly.
+                    Defaults to False
   shuffle_size    : Size of buffer used to hold data for shuffling
 Returns:
   The Dataset with features and one hot encoded label data
@@ -89,7 +93,7 @@ def get_dataset(directory, num_classes=60, batch_size=32, drop_remainder=False,
         features = tf.io.parse_single_example(example_proto, feature_description)
         data =  tf.io.parse_tensor(features['features'], tf.float32)
         label = tf.one_hot(features['label'], num_classes)
-        data = tf.reshape(data, (3, 2, 25, 300))
+        data = tf.reshape(data, (3, 300, 25, 2))
         return data, label
 
     records = [os.path.join(directory, file) for file in os.listdir(directory) if file.endswith("tfrecord")]
@@ -132,7 +136,6 @@ def train_step(features, labels):
     train_acc(labels, logits)
     train_acc_top_5(labels, logits)
     cross_entropy_loss(loss)
-
   strategy.experimental_run_v2(step_fn, args=(features, labels,))
 
 
@@ -159,7 +162,7 @@ if __name__ == "__main__":
 
     '''
     Get tf.dataset objects for training and testing data
-    Data shape: features - batch_size, 2, 3, 25, 300
+    Data shape: features - batch_size, 3, 300, 25, 2
                 labels   - batch_size, num_classes
     '''
     train_data = get_dataset(train_data_path,
@@ -186,7 +189,9 @@ if __name__ == "__main__":
         optimizer    = tf.keras.optimizers.SGD(learning_rate=learning_rate,
                                                momentum=0.9)
         ckpt         = tf.train.Checkpoint(model=model, optimizer=optimizer)
-        ckpt_manager = tf.train.CheckpointManager(ckpt, checkpoint_path, max_to_keep=5)
+        ckpt_manager = tf.train.CheckpointManager(ckpt,
+                                                  checkpoint_path,
+                                                  max_to_keep=5)
 
         # keras metrics to hold accuracies and loss
         cross_entropy_loss   = tf.keras.metrics.Mean(name='cross_entropy_loss')
@@ -234,7 +239,9 @@ if __name__ == "__main__":
         with summary_writer.as_default():
             for layer in gtc_layers:
                 tf.summary.image(layer.name+"_parametric_adjacency_matrix",
-                                 tf.expand_dims(tf.transpose(layer.gcn.B, perm=[1, 2, 0]), axis=0),
+                                 tf.expand_dims(tf.transpose(layer.gcn.B,
+                                                             perm=[1, 2, 0]),
+                                                             axis=0),
                                  step=epoch)
 
         print("Training: ")
@@ -242,9 +249,15 @@ if __name__ == "__main__":
             for features, labels in tqdm(train_data):
                 train_step(features, labels)
                 with summary_writer.as_default():
-                    tf.summary.scalar("cross_entropy_loss", cross_entropy_loss.result(), step=train_iter)
-                    tf.summary.scalar("train_acc", train_acc.result(), step=train_iter)
-                    tf.summary.scalar("train_acc_top_5", train_acc_top_5.result(), step=train_iter)
+                    tf.summary.scalar("cross_entropy_loss",
+                                      cross_entropy_loss.result(),
+                                      step=train_iter)
+                    tf.summary.scalar("train_acc",
+                                      train_acc.result(),
+                                      step=train_iter)
+                    tf.summary.scalar("train_acc_top_5",
+                                      train_acc_top_5.result(),
+                                      step=train_iter)
                 cross_entropy_loss.reset_states()
                 train_acc.reset_states()
                 train_acc_top_5.reset_states()
@@ -258,21 +271,30 @@ if __name__ == "__main__":
             test_acc_top_5(labels, y_pred)
             epoch_test_acc_top_5(labels, y_pred)
             with summary_writer.as_default():
-                tf.summary.scalar("test_acc", test_acc.result(), step=test_iter)
-                tf.summary.scalar("test_acc_top_5", test_acc_top_5.result(), step=test_iter)
+                tf.summary.scalar("test_acc",
+                                  test_acc.result(),
+                                  step=test_iter)
+                tf.summary.scalar("test_acc_top_5",
+                                  test_acc_top_5.result(),
+                                  step=test_iter)
             test_acc.reset_states()
             test_acc_top_5.reset_states()
             test_iter += 1
         with summary_writer.as_default():
-            tf.summary.scalar("epoch_test_acc", epoch_test_acc.result(), step=epoch)
-            tf.summary.scalar("epoch_test_acc_top_5", epoch_test_acc_top_5.result(), step=epoch)
+            tf.summary.scalar("epoch_test_acc",
+                              epoch_test_acc.result(),
+                              step=epoch)
+            tf.summary.scalar("epoch_test_acc_top_5",
+                              epoch_test_acc_top_5.result(),
+                              step=epoch)
         epoch_test_acc.reset_states()
         epoch_test_acc_top_5.reset_states()
 
         if (epoch + 1) % save_freq == 0:
             ckpt_save_path = ckpt_manager.save()
-            print('Saving checkpoint for epoch {} at {}'.format(epoch+1, ckpt_save_path))
+            print('Saving checkpoint for epoch {} at {}'.format(epoch+1,
+                                                                ckpt_save_path))
 
     ckpt_save_path = ckpt_manager.save()
-    print('Saving final checkpoint for epoch {} at {}'.format(epochs, ckpt_save_path))
-
+    print('Saving final checkpoint for epoch {} at {}'.format(epochs,
+                                                              ckpt_save_path))
