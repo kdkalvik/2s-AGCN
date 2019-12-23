@@ -2,6 +2,7 @@ from graph.ntu_rgb_d import Graph
 import tensorflow as tf
 import numpy as np
 
+REGULARIZER = tf.keras.regularizers.l2(l=0.0001)
 
 '''
 Temporal Convolutional layer
@@ -20,7 +21,8 @@ class TCN(tf.keras.Model):
                                            strides=[stride, 1],
                                            padding='same',
                                            kernel_initializer='he_normal',
-                                           data_format='channels_first')
+                                           data_format='channels_first',
+                                           kernel_regularizer=REGULARIZER)
         self.bn   = tf.keras.layers.BatchNormalization(axis=1)
 
     def call(self, x, training):
@@ -44,17 +46,20 @@ class GCN(tf.keras.Model):
                                                       kernel_size=1,
                                                       padding='same',
                                                       kernel_initializer='he_normal',
-                                                      data_format='channels_first'))
+                                                      data_format='channels_first',
+                                                      kernel_regularizer=REGULARIZER))
             self.conv_b.append(tf.keras.layers.Conv2D(filters//coff_embedding,
                                                       kernel_size=1,
                                                       padding='same',
                                                       kernel_initializer='he_normal',
-                                                      data_format='channels_first'))
+                                                      data_format='channels_first',
+                                                      kernel_regularizer=REGULARIZER))
             self.conv_d.append(tf.keras.layers.Conv2D(filters,
                                                       kernel_size=1,
                                                       padding='same',
                                                       kernel_initializer='he_normal',
-                                                      data_format='channels_first'))
+                                                      data_format='channels_first',
+                                                      kernel_regularizer=REGULARIZER))
 
         self.B = tf.Variable(initial_value=adjacency_matrix,
                              trainable=True,
@@ -71,7 +76,8 @@ class GCN(tf.keras.Model):
                                                     kernel_size=1,
                                                     padding='same',
                                                     kernel_initializer='he_normal',
-                                                    data_format='channels_first')
+                                                    data_format='channels_first',
+                                                    kernel_regularizer=REGULARIZER)
             self.bn_down = tf.keras.layers.BatchNormalization(axis=1)
 
 
@@ -167,7 +173,7 @@ class AGCN(tf.keras.Model):
         self.GTC_layers.append(GraphTemporalConv(256, A))
         self.GTC_layers.append(GraphTemporalConv(256, A))
 
-        self.fc = tf.keras.layers.Dense(num_classes)
+        self.fc = tf.keras.layers.Dense(num_classes, kernel_regularizer=REGULARIZER)
 
     def call(self, x, training):
         BatchSize = tf.shape(x)[0]

@@ -148,10 +148,6 @@ if __name__ == "__main__":
     parser = get_parser()
     arg = parser.parse_args()
 
-    #copy hyperparameters and model definition to log folder
-    save_arg(arg)
-    shutil.copy2(inspect.getfile(AGCN), arg.log_dir)
-
     base_lr         = arg.base_lr
     num_classes     = arg.num_classes
     epochs          = arg.num_epochs
@@ -165,6 +161,11 @@ if __name__ == "__main__":
     gpus            = arg.gpus
     strategy        = tf.distribute.MirroredStrategy(arg.gpus)
     global_batch_size = arg.batch_size*strategy.num_replicas_in_sync
+    arg.gpus        = strategy.num_replicas_in_sync
+
+    #copy hyperparameters and model definition to log folder
+    save_arg(arg)
+    shutil.copy2(inspect.getfile(AGCN), arg.log_dir)
 
     '''
     Get tf.dataset objects for training and testing data
@@ -193,7 +194,8 @@ if __name__ == "__main__":
     with strategy.scope():
         model        = AGCN(num_classes=num_classes)
         optimizer    = tf.keras.optimizers.SGD(learning_rate=learning_rate,
-                                               momentum=0.9)
+                                               momentum=0.9,
+                                               nesterov=True)
         ckpt         = tf.train.Checkpoint(model=model, optimizer=optimizer)
         ckpt_manager = tf.train.CheckpointManager(ckpt,
                                                   checkpoint_path,
