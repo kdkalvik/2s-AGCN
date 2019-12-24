@@ -3,7 +3,8 @@ import tensorflow as tf
 import numpy as np
 
 REGULARIZER = tf.keras.regularizers.l2(l=0.0001)
-
+initializer = lambda fan_out : tf.random_normal_initializer(mean=0.0,
+                                                            stddev=np.sqrt(2./fan_out))
 '''
 Temporal Convolutional layer
 Args:
@@ -20,9 +21,10 @@ class TCN(tf.keras.Model):
                                            kernel_size=[kernel_size, 1],
                                            strides=[stride, 1],
                                            padding='same',
-                                           kernel_initializer='he_normal',
+                                           kernel_initializer=initializer(filters*kernel_size),
                                            data_format='channels_first',
-                                           kernel_regularizer=REGULARIZER)
+                                           kernel_regularizer=REGULARIZER,
+                                           bias_regularizer=REGULARIZER)
         self.bn   = tf.keras.layers.BatchNormalization(axis=1)
 
     def call(self, x, training):
@@ -37,29 +39,33 @@ class GCN(tf.keras.Model):
         super().__init__()
         self.num_subset = num_subset
         self.down = down
+        inter_channels = filters//coff_embedding
 
         self.conv_a = []
         self.conv_b = []
         self.conv_d = []
         for _ in range(self.num_subset):
-            self.conv_a.append(tf.keras.layers.Conv2D(filters//coff_embedding,
+            self.conv_a.append(tf.keras.layers.Conv2D(inter_channels,
                                                       kernel_size=1,
                                                       padding='same',
-                                                      kernel_initializer='he_normal',
+                                                      kernel_initializer=initializer(inter_channels*self.num_subset),
                                                       data_format='channels_first',
-                                                      kernel_regularizer=REGULARIZER))
-            self.conv_b.append(tf.keras.layers.Conv2D(filters//coff_embedding,
+                                                      kernel_regularizer=REGULARIZER,
+                                                      bias_regularizer=REGULARIZER))
+            self.conv_b.append(tf.keras.layers.Conv2D(inter_channels,
                                                       kernel_size=1,
                                                       padding='same',
-                                                      kernel_initializer='he_normal',
+                                                      kernel_initializer=initializer(inter_channels*self.num_subset),
                                                       data_format='channels_first',
-                                                      kernel_regularizer=REGULARIZER))
+                                                      kernel_regularizer=REGULARIZER,
+                                                      bias_regularizer=REGULARIZER))
             self.conv_d.append(tf.keras.layers.Conv2D(filters,
                                                       kernel_size=1,
                                                       padding='same',
-                                                      kernel_initializer='he_normal',
+                                                      kernel_initializer=initializer(filters*self.num_subset),
                                                       data_format='channels_first',
-                                                      kernel_regularizer=REGULARIZER))
+                                                      kernel_regularizer=REGULARIZER,
+                                                      bias_regularizer=REGULARIZER))
 
         self.B = tf.Variable(initial_value=adjacency_matrix,
                              trainable=True,
@@ -75,9 +81,10 @@ class GCN(tf.keras.Model):
             self.conv_down = tf.keras.layers.Conv2D(filters,
                                                     kernel_size=1,
                                                     padding='same',
-                                                    kernel_initializer='he_normal',
+                                                    kernel_initializer=initializer(filters),
                                                     data_format='channels_first',
-                                                    kernel_regularizer=REGULARIZER)
+                                                    kernel_regularizer=REGULARIZER,
+                                                    bias_regularizer=REGULARIZER)
             self.bn_down = tf.keras.layers.BatchNormalization(axis=1)
 
 
@@ -125,7 +132,8 @@ Returns:
   A Keras model instance for the block.
 '''
 class GraphTemporalConv(tf.keras.Model):
-    def __init__(self, filters, adjacency_matrix, stride=1, residual=True, down=False):
+    def __init__(self, filters, adjacency_matrix, stride=1, residual=True,
+                 down=False):
         super().__init__()
         self.gcn = GCN(filters, adjacency_matrix, down=down)
         self.tcn = TCN(filters, stride=stride)
@@ -173,7 +181,10 @@ class AGCN(tf.keras.Model):
         self.GTC_layers.append(GraphTemporalConv(256, A))
         self.GTC_layers.append(GraphTemporalConv(256, A))
 
-        self.fc = tf.keras.layers.Dense(num_classes, kernel_regularizer=REGULARIZER)
+        self.fc = tf.keras.layers.Dense(num_classes,
+                                        kernel_initializer=initializer(num_classes),
+                                        kernel_regularizer=REGULARIZER,
+                                        bias_regularizer=REGULARIZER)
 
     def call(self, x, training):
         BatchSize = tf.shape(x)[0]
@@ -182,9 +193,11 @@ class AGCN(tf.keras.Model):
         V         = tf.shape(x)[3]
         M         = tf.shape(x)[4]
 
-        x = tf.reshape(tf.transpose(x, perm=[0, 4, 3, 1, 2]), [BatchSize, -1, T])
+        x = tf.transpose(x, perm=[0, 4, 3, 1, 2])
+        x = tf.reshape(x, [BatchSize, -1, T])
         x = self.data_bn(x, training=training)
-        x = tf.transpose(tf.reshape(x, [BatchSize, M, V, C, T]), perm=[0, 1, 3, 4, 2])
+        x = tf.reshape(x, [BatchSize, M, V, C, T])
+        x = tf.transpose(x, perm=[0, 1, 3, 4, 2])
         x = tf.reshape(x, [BatchSize * M, C, T, V])
 
         for layer in self.GTC_layers:
