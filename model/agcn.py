@@ -4,7 +4,7 @@ import numpy as np
 
 REGULARIZER = tf.keras.regularizers.l2(l=0.0001)
 initializer = lambda fan_out : tf.random_normal_initializer(mean=0.0,
-                                                            stddev=np.sqrt(2./fan_out))
+                                                            stddev=tf.sqrt(2./fan_out))
 '''
 Temporal Convolutional layer
 Args:
@@ -23,8 +23,7 @@ class TCN(tf.keras.Model):
                                            padding='same',
                                            kernel_initializer=initializer(filters*kernel_size),
                                            data_format='channels_first',
-                                           kernel_regularizer=REGULARIZER,
-                                           bias_regularizer=REGULARIZER)
+                                           kernel_regularizer=REGULARIZER)
         self.bn   = tf.keras.layers.BatchNormalization(axis=1)
 
     def call(self, x, training):
@@ -50,24 +49,21 @@ class GCN(tf.keras.Model):
                                                       padding='same',
                                                       kernel_initializer=initializer(inter_channels*self.num_subset),
                                                       data_format='channels_first',
-                                                      kernel_regularizer=REGULARIZER,
-                                                      bias_regularizer=REGULARIZER))
+                                                      kernel_regularizer=REGULARIZER))
             self.conv_b.append(tf.keras.layers.Conv2D(inter_channels,
                                                       kernel_size=1,
                                                       padding='same',
                                                       kernel_initializer=initializer(inter_channels*self.num_subset),
                                                       data_format='channels_first',
-                                                      kernel_regularizer=REGULARIZER,
-                                                      bias_regularizer=REGULARIZER))
+                                                      kernel_regularizer=REGULARIZER))
             self.conv_d.append(tf.keras.layers.Conv2D(filters,
                                                       kernel_size=1,
                                                       padding='same',
                                                       kernel_initializer=initializer(filters*self.num_subset),
                                                       data_format='channels_first',
-                                                      kernel_regularizer=REGULARIZER,
-                                                      bias_regularizer=REGULARIZER))
+                                                      kernel_regularizer=REGULARIZER))
 
-        self.B = tf.Variable(initial_value=adjacency_matrix,
+        self.B = tf.Variable(initial_value=tf.ones_like(adjacency_matrix)*1e-6,
                              trainable=True,
                              name='parametric_adjacency_matrix')
 
@@ -83,8 +79,7 @@ class GCN(tf.keras.Model):
                                                     padding='same',
                                                     kernel_initializer=initializer(filters),
                                                     data_format='channels_first',
-                                                    kernel_regularizer=REGULARIZER,
-                                                    bias_regularizer=REGULARIZER)
+                                                    kernel_regularizer=REGULARIZER)
             self.bn_down = tf.keras.layers.BatchNormalization(axis=1)
 
 
@@ -183,8 +178,7 @@ class AGCN(tf.keras.Model):
 
         self.fc = tf.keras.layers.Dense(num_classes,
                                         kernel_initializer=initializer(num_classes),
-                                        kernel_regularizer=REGULARIZER,
-                                        bias_regularizer=REGULARIZER)
+                                        kernel_regularizer=REGULARIZER)
 
     def call(self, x, training):
         BatchSize = tf.shape(x)[0]
