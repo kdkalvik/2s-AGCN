@@ -3,8 +3,10 @@ import tensorflow as tf
 import numpy as np
 
 REGULARIZER = tf.keras.regularizers.l2(l=0.0001)
-initializer = lambda fan_out : tf.random_normal_initializer(mean=0.0,
-                                                            stddev=tf.sqrt(2./fan_out))
+INITIALIZER = tf.keras.initializers.VarianceScaling(scale=2.,
+                                                    mode='fan_out',
+                                                    distribution='truncated_normal')
+
 '''
 Temporal Convolutional layer
 Args:
@@ -21,7 +23,7 @@ class TCN(tf.keras.Model):
                                            kernel_size=[kernel_size, 1],
                                            strides=[stride, 1],
                                            padding='same',
-                                           kernel_initializer=initializer(filters*kernel_size),
+                                           kernel_initializer=INITIALIZER,
                                            data_format='channels_first',
                                            kernel_regularizer=REGULARIZER)
         self.bn   = tf.keras.layers.BatchNormalization(axis=1)
@@ -39,6 +41,9 @@ class GCN(tf.keras.Model):
         self.num_subset = num_subset
         self.down = down
         inter_channels = filters//coff_embedding
+        branch_conv_init = tf.keras.initializers.VarianceScaling(scale=2./self.num_subset,
+                                                                 mode='fan_out',
+                                                                 distribution='truncated_normal')
 
         self.conv_a = []
         self.conv_b = []
@@ -47,23 +52,23 @@ class GCN(tf.keras.Model):
             self.conv_a.append(tf.keras.layers.Conv2D(inter_channels,
                                                       kernel_size=1,
                                                       padding='same',
-                                                      kernel_initializer=initializer(inter_channels*self.num_subset),
+                                                      kernel_initializer=branch_conv_init,
                                                       data_format='channels_first',
                                                       kernel_regularizer=REGULARIZER))
             self.conv_b.append(tf.keras.layers.Conv2D(inter_channels,
                                                       kernel_size=1,
                                                       padding='same',
-                                                      kernel_initializer=initializer(inter_channels*self.num_subset),
+                                                      kernel_initializer=branch_conv_init,
                                                       data_format='channels_first',
                                                       kernel_regularizer=REGULARIZER))
             self.conv_d.append(tf.keras.layers.Conv2D(filters,
                                                       kernel_size=1,
                                                       padding='same',
-                                                      kernel_initializer=initializer(filters*self.num_subset),
+                                                      kernel_initializer=branch_conv_init,
                                                       data_format='channels_first',
                                                       kernel_regularizer=REGULARIZER))
 
-        self.B = tf.Variable(initial_value=tf.ones_like(adjacency_matrix)*1e-6,
+        self.B = tf.Variable(initial_value=tf.ones_like(adjacency_matrix, dtype=tf.float32)*1e-6,
                              trainable=True,
                              name='parametric_adjacency_matrix')
 
@@ -77,7 +82,7 @@ class GCN(tf.keras.Model):
             self.conv_down = tf.keras.layers.Conv2D(filters,
                                                     kernel_size=1,
                                                     padding='same',
-                                                    kernel_initializer=initializer(filters),
+                                                    kernel_initializer=INITIALIZER,
                                                     data_format='channels_first',
                                                     kernel_regularizer=REGULARIZER)
             self.bn_down = tf.keras.layers.BatchNormalization(axis=1)
@@ -177,7 +182,7 @@ class AGCN(tf.keras.Model):
         self.GTC_layers.append(GraphTemporalConv(256, A))
 
         self.fc = tf.keras.layers.Dense(num_classes,
-                                        kernel_initializer=initializer(num_classes),
+                                        kernel_initializer=INITIALIZER,
                                         kernel_regularizer=REGULARIZER)
 
     def call(self, x, training):
