@@ -53,7 +53,7 @@ def gen_tfrecord_data(num_shards, label_path, data_path, dest_folder, shuffle):
         return -1
 
     print("Data shape:", data.shape)
-    if shuffle:
+    if 'True' in shuffle:
         p = np.random.permutation(len(labels))
         labels = labels[p]
         data = data[p]
