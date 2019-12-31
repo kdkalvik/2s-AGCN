@@ -1,9 +1,10 @@
 # 2s-AGCN
 An **unofficial** Tensorflow implementation of the paper "Two-Stream Adaptive Graph Convolutional Networks for Skeleton-Based Action Recognition" in CVPR 2019.
 
-**NOTE**: Experiment results are not being updated due to hardware limits.
-
 - Paper: [PDF](https://pdfs.semanticscholar.org/e48f/36aacb72adb74cef077c87d2351121124137.pdf?_ga=2.28526716.1745611754.1577059428-1756285583.1573525636)
+
+# Model Weights
+Model weights for ST-GCN trained on xview and xsub joint data [Dropbox](https://www.dropbox.com/sh/go1ut2csqark9uy/AAAk-poVxcptQbcer5Mxw-5Ka?dl=0)
 
 ## Dependencies
 
