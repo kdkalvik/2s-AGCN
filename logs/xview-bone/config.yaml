@@ -1,0 +1,11 @@
+base_lr: 0.1
+batch_size: 64
+checkpoint_path: checkpoints/xview-bone
+gpus: 1
+log_dir: logs/xview-bone
+num_classes: 60
+num_epochs: 50
+save_freq: 10
+steps: [30, 40]
+test_data_path: data/ntu/xview/val_data_bone
+train_data_path: data/ntu/xview/train_data_bone

@@ -1,0 +1,11 @@
+base_lr: 0.1
+batch_size: 64
+checkpoint_path: checkpoints/xsub-bone
+gpus: 1
+log_dir: logs/xsub-bone
+num_classes: 60
+num_epochs: 50
+save_freq: 10
+steps: [30, 40]
+test_data_path: data/ntu/xsub/val_data_bone
+train_data_path: data/ntu/xsub/train_data_bone
